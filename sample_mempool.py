@@ -15,7 +15,10 @@ import tarfile
 import os.path
 import shutil
 import configparser
+from random import randint
 
+
+random_run_number = str(randint(0,999)).zfill(3)
 
 data_dir_path = ""
 maxSamplesInFile = 1000
@@ -77,7 +80,7 @@ def create_out_dir(dirPath):
 
 def output_folder_and_file_names(firstSampleTime):
   output_folder_name = firstSampleTime[0:10]
-  output_file_name = firstSampleTime[11:] + ".log"      
+  output_file_name = random_run_number + "_" + firstSampleTime + ".log"      
   
   dir_path = get_dir_path(output_folder_name)
   create_out_dir(dir_path)
