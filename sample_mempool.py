@@ -18,23 +18,17 @@ import configparser
 from random import randint
 
 
-random_run_number = str(randint(0,999)).zfill(3)
 
 data_dir_path = ""
-maxSamplesInFile = 1000
-maxLinesInFile = 50000
 sleepInterval = 5
+sleepInterval = 1 
 
-#maxSamplesInFile = 10
-#maxLinesInFile = 500
-#sleepInterval = 1 
-
-def get_dir_path(folderName):
+def get_dir_path():
   return data_dir_path  
 
 
 def get_sampling_properties():
-  return maxSamplesInFile,maxLinesInFile,sleepInterval
+  return sleepInterval
 
 
 def make_tarfile(output_filename, source_dir):
@@ -49,7 +43,7 @@ def compress_file(file_path):
   
 
 def compress_and_delete_file(output_folder_name,output_file_name):
-  dir_path = get_dir_path(output_folder_name)
+  dir_path = get_dir_path()
   file_path = os.path.join(dir_path,output_file_name)
   compress_file(file_path)
   os.remove(file_path)
@@ -69,153 +63,129 @@ def connect_to_node(config):
                                                 port=portnum) 
   return bitcoinCoreConnection
 
-def create_out_dir(dirPath):
-  if not os.path.exists(dirPath):
+def create_out_dir(dir_path):
+  if not os.path.exists(dir_path):
       try:
-          os.makedirs(dirPath)
+          os.makedirs(dir_path)
       except OSError as exc: # Guard against race condition
           if exc.errno != errno.EEXIST:
               raise
 
 
-def output_folder_and_file_names(firstSampleTime):
-  output_folder_name = firstSampleTime[0:10]
-  output_file_name = random_run_number + "_" + firstSampleTime + ".log"      
+def output_folder_and_file_names(block_count):
   
-  dir_path = get_dir_path(output_folder_name)
+  current_time = time.strftime("%Y_%m_%d_%H_%M_%S")
+
+  output_file_name = str(block_count) + "_" + current_time + ".log"      
+  dir_path = get_dir_path()
   create_out_dir(dir_path)
-  return output_folder_name,output_file_name
+  return dir_path,output_file_name
               
 
-def write_output_file(output_folder_name,output_file_name,soretedTimeStamps, recordedBlockCountDict,recordedAddEventsDict,recordedRemoveEventsDict):
-  dir_path = get_dir_path(output_folder_name)
+def write_output_file(output_folder_name,output_file_name,events_dict):
+
+  # sort all the samples based on their timestamps
+  soreted_time_stamps = sorted(events_dict.keys())
+
+
+  dir_path = get_dir_path()
   file_path = os.path.join(dir_path,output_file_name)
   f = open(file_path, 'wb')
 
-  for key in soretedTimeStamps:
+
+  print "there are ",len(soreted_time_stamps),"time stamps"
+
+  for key in soreted_time_stamps:
       f.write("timestamp\n")
-      stringToWrite = str(key) + "-" + str(recordedBlockCountDict[key]) + "\n"
+      stringToWrite = str(key) + "\n"
       f.write(stringToWrite)
-      
-      addedTxsEventDict = recordedAddEventsDict[key]
-      removedTxsEventDictd = recordedRemoveEventsDict[key]
+      #print "timestamp",key
+      addedTxsEventDict = events_dict[key]
       
       f.write("added\n")
-      for txName in addedTxsEventDict.keys():
-          txData = addedTxsEventDict[txName]
-          stringToWrite = str(txName) + str(txData) + "\n"
+      for key,value in addedTxsEventDict.items():
+          #print "key",key,"value",value
+          stringToWrite = str(key) + ":" + str(value) + "\n"
           f.write(stringToWrite)
       
       f.write("removed\n")
-      for txName in removedTxsEventDictd.keys():
-          txData = removedTxsEventDictd[txName]
-          stringToWrite = str(txName) + str(txData) + "\n"
-          f.write(stringToWrite)                        
-   
-          
+
   f.close()
   print os.path.abspath(file_path) , " created " 
 
 
+def is_new_file_needed(old_mempool, new_mempool):
+  # check if any tx's were removed from the new mempool
+  return not (set(old_mempool.keys()).issubset(new_mempool.keys()))
+
+
+def list_of_added_transaction_keys(old_mempool, new_mempool):
+  return list(set(new_mempool.keys()) - set(old_mempool.keys()))
+
+
+
+
+def create_file(events_dict,block_count):
+  # create folder
+  output_folder_name,output_file_name = output_folder_and_file_names(block_count)
+
+  #write file
+  write_output_file(output_folder_name, output_file_name, events_dict)
+      
+  #tar gz and delete file
+  compress_and_delete_file(output_folder_name,output_file_name)
+
+
+
+def compare_three_numbers(a,b,c):
+  return (a == b == c)
+
+
 def main(config):
   bitcoinCoreConnection = connect_to_node(config)
-  maxSamplesInFile,maxLinesInFile,sleepInterval = get_sampling_properties()
+  sleepInterval = get_sampling_properties()
 
   
   # these two dicts keep track of what happened in the previous iteration
-  oldTxsInMempool = {}
-  newTxsInMempool = {}
+  old_mempool = {}
+  events_dict = {}
+  previous_block_count = 0
   
   while True:
       #print "start of new outer iteration"
-      firstSampleTime = 0
-      samplesCounter = 0
-      approxLinesInFile = 0
-      recordedBlockCountDict = {}
-      recordedAddEventsDict = {}
-      recordedRemoveEventsDict = {}
-  
-      while samplesCounter < maxSamplesInFile and approxLinesInFile < maxLinesInFile:
-          #print "start of new inner iteration" , samplesCounter , maxSamplesInFile , approxLinesInFile , maxLinesInFile
-          # these two dicts help us keep track of changes in the current iteration
-          addedTxsEventDict = {}
-          removedTxsEventDict = {}
-          
-          # record the time of current iteration
-          sampleTime = time.time()
-          # get data from bitcoin core client
-          try:
-              blockCount = bitcoinCoreConnection.getblockcount()
-              verboseRawMemPool = bitcoinCoreConnection.getrawmempool(verbose=True)
-          except _wrap_exception:
-              print "caught exception " +  str(_wrap_exception) + " at time " + time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
-              time.sleep(sleepInterval)
-              continue
-          except Exception:
-              print "caught exception " +  str(Exception) + " at time " + time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
-              time.sleep(sleepInterval)
-              continue        
-              
-              
-          # check which txs already existed
-          for currentTxName in verboseRawMemPool: 
-              # add to new dict
-              newTxsInMempool[currentTxName] = verboseRawMemPool[currentTxName]
-              if currentTxName in oldTxsInMempool:
-                  # remove from old dict
-                  del oldTxsInMempool[currentTxName]
-                  #print "removed " , currentTxName , " from oldTxsInMempool which is now of length " , len(oldTxsInMempool)
-              else:
-                  # mark as a new tx
-                  addedTxsEventDict[currentTxName] = verboseRawMemPool[currentTxName]
-                  #print "added " , currentTxName , " to addedTxsEventDict which is now of length " , len(addedTxsEventDict)
-  
-         
-          # check if old txs no longer exist
-          for currentTxName in oldTxsInMempool.keys(): 
-              # add to new dict
-              removedTxsEventDict[currentTxName] = oldTxsInMempool[currentTxName]
-              #print "added " , currentTxName , " to removedTxsEventDict which is now of length " , len(removedTxsEventDict)
-              del oldTxsInMempool[currentTxName]
-              #print "removed " , currentTxName , " from oldTxsInMempool which is now of length " , len(oldTxsInMempool)
-  
-          assert len(oldTxsInMempool) == 0
-  
-          recordedBlockCountDict[sampleTime] = blockCount
-          recordedAddEventsDict[sampleTime]  = addedTxsEventDict
-          recordedRemoveEventsDict[sampleTime] = removedTxsEventDict
-  
-          #   mark first sample   
-          if firstSampleTime == 0:
-              firstSampleTime = time.strftime("%Y_%m_%d_%H_%M_%S")
-      
-          #   prepare for next iteration
-          samplesCounter = samplesCounter + 1
-          approxLinesInFile = approxLinesInFile + len(addedTxsEventDict) + len(removedTxsEventDict)
+
+      current_time_sample = time.time()
+      # get data from bitcoin core client
+      try:
+          block_count_pre = bitcoinCoreConnection.getblockcount()
+          new_mempool = bitcoinCoreConnection.getrawmempool(verbose=True)
+          block_count_post = bitcoinCoreConnection.getblockcount()          
+      except _wrap_exception:
+          print "caught exception " +  str(_wrap_exception) + " at time " + time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
           time.sleep(sleepInterval)
-          oldTxsInMempool = newTxsInMempool
-          newTxsInMempool = {}
-          
-          #end of " while samplesCounter < maxSamplesInFile and approxLinesInFile < maxLinesInFile:"
+          continue
+      except Exception:
+          print "caught exception " +  str(Exception) + " at time " + time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+          time.sleep(sleepInterval)
+          continue        
 
-      # sort all the samples based on their timestamps
-      soretedTimeStamps = sorted(recordedAddEventsDict.keys())
+
+      if (not is_new_file_needed(old_mempool, new_mempool) and compare_three_numbers(block_count_pre,block_count_post,previous_block_count)):
+        # list of new txs in mempool
+        added_txs_names_list = list_of_added_transaction_keys(old_mempool, new_mempool)
+        # dict of all new txs in mempool
+        added_tx_details_dict = dict([(key, value) for key, value in new_mempool.items() if key in added_txs_names_list])
+        # record time, block count and new tx data
+        events_dict[current_time_sample] = added_tx_details_dict
+        # sleep
+        time.sleep(sleepInterval)
+      else:
+        create_file(events_dict,previous_block_count)
+        #cleanups for the next iteration
+        events_dict.clear()    
       
-      #create folder
-      output_folder_name,output_file_name = output_folder_and_file_names(firstSampleTime)
-
-      #write file
-      write_output_file(output_folder_name, output_file_name, soretedTimeStamps, recordedBlockCountDict,recordedAddEventsDict,recordedRemoveEventsDict)
-      
-      #tar gz and delete file
-      compress_and_delete_file(output_folder_name,output_file_name)
-
-      #cleanups for the next iteration
-      del soretedTimeStamps[:]
-      addedTxsEventDict.clear()    
-      recordedAddEventsDict.clear()
-      recordedRemoveEventsDict.clear()
-
+      previous_block_count = block_count_post
+      old_mempool = new_mempool
       #end of "while true"
 
 
