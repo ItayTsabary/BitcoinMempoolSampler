@@ -73,9 +73,9 @@ def create_out_dir(dir_path):
 def round_down(num, divisor):
   return num - (num%divisor)
 
-def output_folder_and_file_names(current_time_sample,block_count):
-  output_file_name = str(block_count) + "_" + current_time_sample + ".log"
-  rounded_block_number = round_down(block_count,100)
+def output_folder_and_file_names(current_time_sample,block_count_pre,block_count_post):
+  output_file_name = str(block_count_pre) + "_" + str(block_count_post) + "_" + current_time_sample + ".log"
+  rounded_block_number = round_down(block_count_pre,100)
   dir_path = os.path.join(get_dir_path(),str(rounded_block_number))
   create_out_dir(dir_path)
   return dir_path,output_file_name
@@ -93,9 +93,9 @@ def write_output_file(output_folder_name, output_file_name, mempool):
 
 
 
-def  create_file(current_time_sample,block_count,mempool):
+def  create_file(current_time_sample,block_count_pre,block_count_post,mempool):
   # create folder
-  output_folder_name,output_file_name = output_folder_and_file_names(current_time_sample,block_count)
+  output_folder_name,output_file_name = output_folder_and_file_names(current_time_sample,block_count_pre,block_count_post)
 
   #write file
   write_output_file(output_folder_name, output_file_name, mempool)
@@ -113,7 +113,7 @@ def main(config):
   bitcoinCoreConnection = connect_to_node(config)
   sleepInterval = get_sampling_properties()
 
-
+  print bitcoinCoreConnection
   # these two dicts keep track of what happened in the previous iteration
 
 
@@ -125,9 +125,10 @@ def main(config):
       current_time_sample = time.strftime("%Y_%m_%d_%H_%M_%S")
       # get data from bitcoin core client
       try:
-          block_count = bitcoinCoreConnection.getblockcount()
+          block_count_pre = bitcoinCoreConnection.getblockcount()
           mempool = bitcoinCoreConnection.getrawmempool(verbose=True)
-          create_file(current_time_sample,block_count,mempool)
+          block_count_post = bitcoinCoreConnection.getblockcount()
+          create_file(current_time_sample,block_count_pre,block_count_post,mempool)
       except _wrap_exception as e:
           print "caught exception {} at time {}".format(traceback.print_exc(e), time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
       except Exception as e:
