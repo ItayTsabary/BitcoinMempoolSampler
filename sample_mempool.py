@@ -113,12 +113,6 @@ def main(config):
   bitcoinCoreConnection = connect_to_node(config)
   sleepInterval = get_sampling_properties()
 
-  print bitcoinCoreConnection
-  # these two dicts keep track of what happened in the previous iteration
-
-
-
-
   while True:
       #print "start of new outer iteration"
 
